@@ -1,0 +1,9 @@
+node_modules
+web/dist
+data
+.env*
+import
+backups
+__pycache__
+*.pyc
+.DS_Store

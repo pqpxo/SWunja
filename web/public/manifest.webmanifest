@@ -1,0 +1,16 @@
+{
+  "name": "SWunja",
+  "short_name": "SWunja",
+  "start_url": "/#/home",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#1e293b",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

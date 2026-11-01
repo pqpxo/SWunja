@@ -1,0 +1,10 @@
+node_modules
+web/dist
+import
+docs
+.claude
+.impeccable
+.env*
+server/*.test.ts
+*.md
+backups

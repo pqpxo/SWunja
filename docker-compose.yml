@@ -1,0 +1,13 @@
+services:
+  swunja:
+    build: .
+    image: swunja:latest
+    container_name: swunja
+    restart: unless-stopped
+    ports:
+      - "${SWUNJA_PORT:-7760}:3000"
+    volumes:
+      - swunja-data:/data
+
+volumes:
+  swunja-data:
