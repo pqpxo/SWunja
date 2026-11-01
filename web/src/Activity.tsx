@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { Check, RefreshCw, Search, Trash2, Undo2, X } from 'lucide-react';
 import { api, get, type Activity, type ActivityTarget, type ClaudeSettings, type Task } from './api';
 import { useData } from './App';
 import { ago } from './ui';
@@ -61,6 +61,13 @@ function ActivityCard({ a, onChange }: { a: Activity; onChange: () => void }) {
       )}
 
       {a.status === 'accepted' && a.task_id && <p className="small">Added to <a href={`#/t/${a.task_id}`}>the task</a>.</p>}
+      {a.status === 'dismissed' && (
+        <div className="row gap wrap">
+          <button disabled={busy} onClick={() => act(() => api('POST', `/activity/${a.id}/restore`))}><Undo2 size={15} />Restore</button>
+          <span className="muted small">Moves it back to Waiting so you can accept it. Dismissed items are deleted after 30 days.</span>
+          {err && <p className="error">{err}</p>}
+        </div>
+      )}
       {waiting && (
         <div className="activity-match">
           {!sug && <p className="muted small">{a.error ?? 'Not matched yet.'} <button className="link-btn" disabled={busy} onClick={() => act(() => api('POST', `/activity/${a.id}/match`))}>Match Now</button></p>}

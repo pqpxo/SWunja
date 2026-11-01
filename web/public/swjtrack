@@ -36,7 +36,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = '1.3.0'
+VERSION = '1.3.1'
 CONFIG = Path.home() / '.config' / 'swjtrack' / 'config.json'
 CAPS = {'prompts': 50, 'commands': 500, 'files': 1000, 'commits': 200}
 
@@ -267,12 +267,15 @@ def _events(folder: str) -> list:
         lines = _events_path(folder).read_text(encoding='utf-8').splitlines()
     except OSError:
         return []
-    out = []
+    out, entries = [], ignores()
     for line in lines:
         try:
-            out.append(json.loads(line))
+            e = json.loads(line)
         except ValueError:
-            pass
+            continue
+        # file changes recorded before their path was ignored are dropped too (sync rewrites the file from this list)
+        if not (entries and e.get('kind') == 'file' and is_ignored(e.get('path', ''), entries)):
+            out.append(e)
     return out
 
 
@@ -379,8 +382,13 @@ def watch_once(folder: str, now: float | None = None) -> int:
     """Compares the folder with its last scan and records created / edited / deleted files. Returns how many changed."""
     now = time.time() if now is None else now
     before, after = _read_json(_snap_path(folder), {}), _scan(folder)
+    # a file missing because its path is now ignored was not deleted, so it is dropped quietly
+    entries = ignores()
+    gone = [p for p in before if p not in after]
+    hidden = {p for p in gone if is_ignored(os.path.join(folder, p), entries)
+              or any(fnmatch.fnmatch(p, g) or fnmatch.fnmatch(os.path.basename(p), g) for g in entries if not os.path.isabs(g))}
     changes = [(p, 'created') for p in after if p not in before] + [(p, 'edited') for p in after if p in before and after[p] != before[p]] \
-        + [(p, 'deleted') for p in before if p not in after]
+        + [(p, 'deleted') for p in gone if p not in hidden]
     # a file already waiting as created/edited needs no second "edited" (a busy file would add one every scan)
     waiting = {e['path'] for e in _events(folder) if e.get('kind') == 'file' and e.get('change') in ('created', 'edited')} if changes else set()
     for rel, change in changes:
@@ -388,7 +396,7 @@ def watch_once(folder: str, now: float | None = None) -> int:
         if change == 'edited' and path in waiting:
             continue
         _append(folder, {'t': now, 'kind': 'file', 'path': path, 'change': change})
-    if changes or not _snap_path(folder).exists():
+    if changes or hidden or not _snap_path(folder).exists():
         _write_json(_snap_path(folder), after)
     return len(changes)
 

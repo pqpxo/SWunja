@@ -646,6 +646,26 @@ class Ignoring(unittest.TestCase):
         names = sorted(os.path.relpath(f['path'], self.dir).replace(os.sep, '/') for f in sw.collect(self.dir)['files'])
         self.assertEqual(names, ['app.conf', 'secrets-not/ok.txt'], 'a prefix that is not the same folder still counts')
 
+    def test_ignoring_a_folder_later_does_not_report_its_files_as_deleted(self):
+        npm = os.path.join(self.dir, 'nginxproxymanager')
+        os.makedirs(npm)
+        Path(npm, 'docker-compose.yml').write_text('x')
+        Path(self.dir, 'keep.txt').write_text('x')
+        sw.watch_once(self.dir)                       # both recorded as created
+        sw.add_ignore(npm + os.sep)                   # as typed in the menu, with a trailing slash
+        sw.watch_once(self.dir)                       # npm files now vanish from the scan
+        os.remove(os.path.join(self.dir, 'keep.txt'))
+        sw.watch_once(self.dir)
+        files = [(os.path.relpath(f['path'], self.dir), f['change']) for f in sw.collect(self.dir)['files']]
+        self.assertEqual(files, [('keep.txt', 'deleted')], 'the ignored folder left the queue and was never "deleted"')
+        sw.add_ignore('*.log')                        # a glob added later behaves the same
+        Path(self.dir, 'a.log').write_text('x')
+        sw.remove_ignore('*.log')
+        sw.watch_once(self.dir)
+        sw.add_ignore('*.log')
+        sw.watch_once(self.dir)
+        self.assertNotIn('a.log', [os.path.basename(f['path']) for f in sw.collect(self.dir)['files']])
+
     def test_commands_typed_in_an_ignored_folder_are_skipped(self):
         sw.add_ignore(os.path.join(self.dir, 'secrets'))
         self.assertFalse(sw.record_cmd(os.path.join(self.dir, 'secrets'), '1  cat key.pem', 0))

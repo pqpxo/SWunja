@@ -248,6 +248,14 @@ export function dismissActivity(db: DatabaseSync, id: number): Activity {
   return getActivity(db, id);
 }
 
+/** Brings a dismissed item back to the waiting list, keeping its suggestion if it had one. */
+export function restoreActivity(db: DatabaseSync, id: number): Activity {
+  const a = getActivity(db, id);
+  if (a.status !== 'dismissed') throw new HttpError(400, 'Only dismissed activity can be restored');
+  db.prepare("UPDATE activity SET status=?, updated=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=?").run(a.suggestion ? 'matched' : 'pending', id);
+  return getActivity(db, id);
+}
+
 /* ---------------- reminders: "have you synced your activity for X?" ---------------- */
 
 type Send = (m: { event: 'activity'; title: string; message: string }) => Promise<unknown>;
