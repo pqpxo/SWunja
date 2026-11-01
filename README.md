@@ -2,6 +2,8 @@
 
 <h1 align="center">SWunja</h1>
 
+<br />
+
 <p align="center">A self-hosted task tracker for your homelab, with the logbook, maintenance schedule, runbooks, ideas and service checks built in. Claude can read and update all of it.</p>
 
 <p align="center">
@@ -12,7 +14,11 @@
   <a href="#develop">Develop</a>
 </p>
 
+<br />
+
 ![The Home page: open tasks, services, maintenance, what's due in the next two weeks](docs/screenshots/home.png)
+
+<br />
 
 Most task trackers know nothing about servers, and most homelab dashboards can't hold a to-do list. SWunja keeps both in one place, so it can answer the everyday questions:
 - What's broken?
@@ -21,6 +27,8 @@ Most task trackers know nothing about servers, and most homelab dashboards can't
 - What breaks if I reboot this host?
 
 It's a single container with one SQLite file, built for one person.
+
+<br />
 
 ## Quick start
 
@@ -35,6 +43,8 @@ docker compose up -d --build
 Open `http://<your-server>:7760` and choose a password. That's it: no database to set up and no account to create. Everything is stored in the `swunja-data` volume, including the database, attachments and backups.
 
 Whoever opens it first sets the password, so do that straight away, before you make it reachable from anywhere else. To use it away from home, put it behind a reverse proxy with HTTPS (Nginx Proxy Manager, Caddy and so on) rather than opening the port.
+
+<br />
 
 ## A quick tour
 
@@ -129,6 +139,8 @@ There are eleven themes, including light, dark, Nord, Dracula, Catppuccin and So
 - **Backups:** daily SQLite and attachment backups, optionally copied to Google Drive.
 - **Import and export:** one zip of everything; imports Vikunja exports too.
 
+<br />
+
 ## Claude Code (MCP)
 
 SWunja has a built-in [MCP](https://modelcontextprotocol.io) server. In **Settings → API Tokens & MCP**, generate a token, then:
@@ -147,6 +159,8 @@ Claude can then work with SWunja directly. For example:
 
 Changes Claude makes show up in each task's history and are marked as new in the web UI until you open them.
 
+<br />
+
 ## swjtrack (optional)
 
 To record what you do on a Linux host, install the agent there:
@@ -156,6 +170,8 @@ curl -fsSL http://<your-server>:7760/swjtrack/install | sh
 ```
 
 The installer asks for an API token, which folders to watch, and how often to remind you to sync.
+
+<br />
 
 ## Configuration
 
@@ -172,6 +188,8 @@ Everything else is set up in **Settings**, including backups, notification chann
 
 To restore a backup, stop the container. Replace `samunja.db` and the `files/` folder in the data volume with the ones from the backup zip, delete `samunja.db-wal` and `samunja.db-shm`, then start the container again. Each zip includes these steps.
 
+<br />
+
 ## Develop
 
 You need Node 24. There's no build step for the server: Node runs the TypeScript directly.
@@ -187,6 +205,8 @@ npm run build                             # web UI -> web/dist
 The stack is Fastify, `node:sqlite`, React 19, Vite and the MCP TypeScript SDK.
 
 The screenshots show made-up demo data.
+
+<br />
 
 ## License
 
