@@ -2,6 +2,8 @@
 
 <h1 align="center">SWunja</h1>
 
+<br />
+
 <p align="center">A self-hosted task tracker for your homelab, with the logbook, maintenance schedule, runbooks, ideas and service checks built in. Claude can read and update all of it.</p>
 
 <p align="center">
@@ -13,7 +15,11 @@
   <a href="#develop">Develop</a>
 </p>
 
+<br />
+
 ![The Home page: open tasks, services, maintenance, what's due in the next two weeks](docs/screenshots/home.png)
+
+<br />
 
 Most task trackers know nothing about servers, and most homelab dashboards can't hold a to-do list. SWunja keeps both in one place, so it can answer the everyday questions:
 - What's broken?
@@ -36,6 +42,8 @@ Key features:
 - **Claude can use all of it** through the built-in MCP server.
 - **Search, templates, backups** (optionally to Google Drive), import and export, and eleven themes.
 
+<br />
+
 ## Quick start
 
 You need Docker with Compose.
@@ -49,6 +57,8 @@ docker compose up -d --build
 Open `http://<your-server>:7760` and choose a password. That's it: no database to set up and no account to create. Everything is stored in the `swunja-data` volume, including the database, attachments and backups.
 
 Whoever opens it first sets the password, so do that straight away, before you make it reachable from anywhere else. To use it away from home, put it behind a reverse proxy with HTTPS (Nginx Proxy Manager, Caddy and so on) rather than opening the port.
+
+<br />
 
 ## A quick tour
 
@@ -143,6 +153,8 @@ There are eleven themes, including light, dark, Nord, Dracula, Catppuccin and So
 - **Backups:** daily SQLite and attachment backups, optionally copied to Google Drive.
 - **Import and export:** one zip of everything; imports Vikunja exports too.
 
+<br />
+
 ## Claude Code (MCP)
 
 SWunja has a built-in [MCP](https://modelcontextprotocol.io) server. In **Settings → API Tokens & MCP**, generate a token, then:
@@ -160,6 +172,8 @@ Claude can then work with SWunja directly. For example:
 - "Note an idea for Homelab: try Frigate for the cameras."
 
 Changes Claude makes show up in each task's history and are marked as new in the web UI until you open them.
+
+<br />
 
 ## Activity agent: swjtrack (optional)
 
@@ -237,6 +251,8 @@ When you accept, SWunja remembers which project that folder belongs to, so later
 
 To remove the agent, delete `~/.local/bin/swjtrack`, `~/.config/swjtrack` and `~/.local/share/swjtrack`. Then remove the block between `# >>> swjtrack >>>` and `# <<< swjtrack <<<` in `~/.bashrc` (and `~/.zshrc`).
 
+<br />
+
 ## Configuration
 
 | Variable | Default | What it does |
@@ -251,6 +267,8 @@ To remove the agent, delete `~/.local/bin/swjtrack`, `~/.config/swjtrack` and `~
 Everything else is set up in **Settings**, including backups, notification channels, the Claude API key, Google Drive, UniFi, Proxmox, the GitHub token, themes and the sidebar. API keys are write-only: once saved they're never shown again, and they're never included in exports.
 
 To restore a backup, stop the container. Replace `samunja.db` and the `files/` folder in the data volume with the ones from the backup zip, delete `samunja.db-wal` and `samunja.db-shm`, then start the container again. Each zip includes these steps.
+
+<br />
 
 ## Develop
 
@@ -267,6 +285,8 @@ npm run build                             # web UI -> web/dist
 The stack is Fastify, `node:sqlite`, React 19, Vite and the MCP TypeScript SDK.
 
 The screenshots show made-up demo data.
+
+<br />
 
 ## License
 
