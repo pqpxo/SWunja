@@ -203,7 +203,7 @@ The agent lives in `~/.local/bin/swjtrack`. Its config (server and token) is in 
 
 Inside a tracked folder:
 - **Commands** you type, with their exit codes.
-- **Files** created, edited or deleted, found by a background watcher every few seconds. Logs, swap files and SQLite journals are skipped, and `swjtrack ignore GLOB` skips anything else.
+- **Files** created, edited or deleted, found by a background watcher every few seconds. Logs, swap files and SQLite journals are skipped, and `swjtrack ignore` skips anything else (see below).
 - **Git commits** made since the last sync.
 
 From Claude Code (any folder): the prompts you typed, the commands it ran and the files it changed.
@@ -246,8 +246,22 @@ When you accept, SWunja remembers which project that folder belongs to, so later
 | `swjtrack sync [-f DIR]` | Sends waiting activity now, for every folder or just one. |
 | `swjtrack -f DIR [-i 30m]` | Tracks another folder, optionally with its own check-in interval. |
 | `swjtrack stop -f DIR` | Stops tracking a folder. Sync first, or add `--discard` to drop what's waiting. |
-| `swjtrack ignore GLOB` | Never records paths matching `GLOB`, for example `*.tmp`. |
+| `swjtrack ignore PATH` | Never records anything in that folder or file, for example `~/docker/nextcloud/data`: not its files, not commands typed there and not Claude Code sessions run there. |
+| `swjtrack ignore GLOB` | Never records files or folders whose name matches, for example `*.tmp` or `backups`. |
+| `swjtrack ignore` | Lists what is ignored. |
+| `swjtrack unignore PATH\|GLOB` | Stops ignoring it. |
+| `swjtrack update` | Installs the latest agent from your SWunja server and restarts its watcher. |
 | `swjtrack claude-setup` | Adds the Claude Code hook if you skipped it during install. |
+
+### Keeping agents up to date
+
+After you update SWunja, run `swjtrack update` on each host. Agents installed before SWunja 1.16.0 don't have it yet, so run the install command once more on those. It offers to keep your saved token, and folders you already track stay tracked (answer `none` at the folders step to add no more).
+
+To update every time the host runs `apt-get update`, add an APT hook (replace `me` with the user who installed swjtrack):
+
+```bash
+echo 'APT::Update::Post-Invoke { "runuser -u me -- /home/me/.local/bin/swjtrack update || true"; };' | sudo tee /etc/apt/apt.conf.d/99swjtrack
+```
 
 To remove the agent, delete `~/.local/bin/swjtrack`, `~/.config/swjtrack` and `~/.local/share/swjtrack`. Then remove the block between `# >>> swjtrack >>>` and `# <<< swjtrack <<<` in `~/.bashrc` (and `~/.zshrc`).
 
