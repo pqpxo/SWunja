@@ -5,7 +5,10 @@
   swjtrack stop -f DIR        stop tracking it (sync first, or add --discard)
   swjtrack status             what is tracked and waiting
   swjtrack sync [-f DIR]      send waiting activity now
-  swjtrack ignore GLOB        never record paths matching GLOB
+  swjtrack ignore PATH|GLOB   never record a folder or file (/srv/secrets, ~/x) or names matching GLOB (*.tmp)
+  swjtrack ignore             list what is ignored
+  swjtrack unignore PATH|GLOB stop ignoring it
+  swjtrack update             replace this agent with the latest copy from your SWunja server
   swjtrack claude-setup       add the Claude Code SessionEnd hook
   swjtrack claude-hook        (run by Claude Code) report a finished session
 
@@ -32,7 +35,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = '1.0.0'
+VERSION = '1.1.0'
 CONFIG = Path.home() / '.config' / 'swjtrack' / 'config.json'
 CAPS = {'prompts': 50, 'commands': 500, 'files': 1000, 'commits': 200}
 
@@ -162,11 +165,15 @@ def cmd_claude_hook(event: dict, cfg: dict | None = None) -> int:
     """Claude Code SessionEnd hook: report the session. Always exits 0 so it can never get in Claude Code's way."""
     cfg = load_config() if cfg is None else cfg
     try:
+        cwd = event.get('cwd') or os.getcwd()
+        if is_ignored(cwd):
+            return 0
         r = parse_transcript(event['transcript_path'])
+        r['files'] = [f for f in r['files'] if not is_ignored(os.path.join(cwd, f['path']))]
         if not r['files'] and not r['commands']:
             return 0
         sid = str(event.get('session_id') or '')
-        post_activity(cfg, {'source': 'claude-code', 'host': socket.gethostname(), 'folder': event.get('cwd') or os.getcwd(),
+        post_activity(cfg, {'source': 'claude-code', 'host': socket.gethostname(), 'folder': cwd,
                             'batch_id': 'cc-' + sid, 'session_id': sid, **r})
     except Exception as e:  # noqa: BLE001 - a hook must never get in Claude Code's way
         print(f'swjtrack: could not report this session: {e}', file=sys.stderr)
@@ -304,10 +311,37 @@ def ignores() -> list:
     return _read_json(state_dir() / 'ignore.json', [])
 
 
-def add_ignore(glob: str) -> None:
-    globs = ignores()
-    if glob not in globs:
-        _write_json(state_dir() / 'ignore.json', globs + [glob])
+def _ignore_entry(pattern: str) -> str:
+    """A path (/srv/x, ~/x, ./x) is stored absolute; anything else stays a glob like *.tmp or backups."""
+    if pattern.startswith(('/', '~', './', '../')) or pattern in ('.', '..'):
+        return os.path.abspath(os.path.expanduser(pattern))
+    return pattern
+
+
+def add_ignore(pattern: str) -> str:
+    entry, entries = _ignore_entry(pattern), ignores()
+    if entry not in entries:
+        _write_json(state_dir() / 'ignore.json', entries + [entry])
+    return entry
+
+
+def remove_ignore(pattern: str) -> bool:
+    entries = ignores()
+    keep = [e for e in entries if e not in (pattern, _ignore_entry(pattern))]
+    _write_json(state_dir() / 'ignore.json', keep)
+    return len(keep) < len(entries)
+
+
+def is_ignored(path: str, entries: list | None = None) -> bool:
+    """True if an absolute path is, or is inside, an ignored path, or any part of it matches an ignored glob."""
+    path = os.path.abspath(os.path.expanduser(path))
+    for e in ignores() if entries is None else entries:
+        if os.path.isabs(e):
+            if path == e or path.startswith(e.rstrip(os.sep) + os.sep):
+                return True
+        elif any(fnmatch.fnmatch(part, e) for part in path.split(os.sep) if part):
+            return True
+    return False
 
 
 # ---------------- capture ----------------
@@ -320,13 +354,16 @@ MAX_FILES = 50000
 
 def _scan(folder: str) -> dict:
     """{relative path: mtime} for every file under folder, skipping noise and ignored paths."""
-    out, globs = {}, NOISE + ignores()
+    out, entries = {}, ignores()
+    globs = NOISE + [e for e in entries if not os.path.isabs(e)]
+    paths = [e for e in entries if os.path.isabs(e)]
     for root, dirs, files in os.walk(folder):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        # ignored folders are not walked at all
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not is_ignored(os.path.join(root, d), entries)]
         for name in files:
             full = os.path.join(root, name)
             rel = os.path.relpath(full, folder)
-            if any(fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(name, g) for g in globs):
+            if any(fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(name, g) for g in globs) or is_ignored(full, paths):
                 continue
             try:
                 out[rel] = os.stat(full).st_mtime
@@ -369,7 +406,7 @@ def _hist_cmd(histline: str) -> str:
 def record_cmd(cwd: str, histline: str, exit_code: int, now: float | None = None) -> bool:
     folder = folder_for(cwd)
     cmd = _hist_cmd(histline)
-    if not folder or not cmd or cmd.split()[0] == 'swjtrack':
+    if not folder or not cmd or cmd.split()[0] == 'swjtrack' or is_ignored(cwd):
         return False
     folders = tracked()
     if folders[folder].get('last_hist') == histline.strip():  # Enter on an empty prompt repeats the last history line
@@ -480,6 +517,43 @@ def ensure_watcher() -> None:
     p = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '_watch'], stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     pid_file.write_text(str(p.pid))
+
+
+def _remote_version(text: str) -> str | None:
+    m = re.search(r"^VERSION = '([^']+)'", text, re.M)
+    return m.group(1) if m else None
+
+
+def cmd_update(cfg: dict | None = None, target: str | None = None) -> int:
+    """Replaces this script with the copy the SWunja server hands out, then restarts the folder watcher."""
+    cfg = load_config() if cfg is None else cfg
+    if not cfg.get('server'):
+        print('swjtrack: not set up, so there is no server to update from', file=sys.stderr)
+        return 1
+    try:
+        with urllib.request.urlopen(cfg['server'].rstrip('/') + '/swjtrack', timeout=15) as r:
+            text = r.read().decode('utf-8')
+        new = _remote_version(text)
+        if not text.startswith('#!/usr/bin/env python3') or not new:
+            raise ValueError('the server did not send a swjtrack script')
+        compile(text, 'swjtrack', 'exec')  # never swap in a script that would not run
+    except (OSError, ValueError, SyntaxError, UnicodeDecodeError) as e:
+        print(f'swjtrack: update failed ({e}); nothing changed', file=sys.stderr)
+        return 1
+    if new == VERSION:
+        print(f'swjtrack: already up to date ({VERSION})')
+        return 0
+    path = Path(target or Path(__file__).resolve())
+    _write_text(path, text)
+    os.chmod(path, 0o755)
+    pid_file = state_dir() / 'watcher.pid'
+    if pid_file.exists():
+        pid_file.write_text('')  # the old watcher sees it is no longer the owner and exits
+        if tracked() and not os.environ.get('SWJTRACK_NO_WATCH'):
+            subprocess.Popen([sys.executable, str(path), '_watch'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+    print(f'swjtrack: updated {VERSION} -> {new}')
+    return 0
 
 
 def watcher_loop(every: float = 5) -> None:
@@ -759,9 +833,17 @@ def main(argv: list[str]) -> int:
         print(f'swjtrack: sent {len(ids)} item{"s" if len(ids) != 1 else ""} to SWunja' if ids else 'swjtrack: nothing to send')
         return 0
     if cmd == 'ignore' and len(argv) > 1:
-        add_ignore(argv[1])
-        print(f'swjtrack: ignoring {argv[1]}')
+        print(f'swjtrack: ignoring {add_ignore(argv[1])}')
         return 0
+    if cmd == 'ignore':
+        print('\n'.join(ignores()) or 'swjtrack: nothing is ignored')
+        return 0
+    if cmd == 'unignore' and len(argv) > 1:
+        if remove_ignore(argv[1]):
+            print(f'swjtrack: no longer ignoring {argv[1]}')
+            return 0
+        print(f'swjtrack: {argv[1]} was not ignored (swjtrack ignore lists them)', file=sys.stderr)
+        return 1
     if cmd == '_hook' and len(argv) >= 3:
         if not os.environ.get('SWJTRACK_NO_WATCH'):
             ensure_watcher()
@@ -781,6 +863,8 @@ def main(argv: list[str]) -> int:
         return cmd_claude_hook(event)
     if cmd == 'claude-setup':
         return cmd_claude_setup(argv[1] if len(argv) > 1 else None)
+    if cmd == 'update':
+        return cmd_update()
     if cmd == '--version':
         print(VERSION)
         return 0

@@ -612,5 +612,119 @@ class ShellHook(unittest.TestCase):
         self.assertEqual(len(sw.collect(self.dir)['commands']), 1, 'still recorded')
 
 
+class Ignoring(unittest.TestCase):
+    """swjtrack ignore PATH|GLOB: ignored folders and files are never recorded, by any part of the agent."""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp()
+        os.environ['SWJTRACK_HOME'] = self.home
+        self.dir = os.path.realpath(tempfile.mkdtemp())
+        os.makedirs(os.path.join(self.dir, 'secrets'))
+        os.makedirs(os.path.join(self.dir, 'backups', 'daily'))
+        sw.track(self.dir, 7200)
+
+    def tearDown(self):
+        os.environ.pop('SWJTRACK_HOME', None)
+
+    def test_paths_are_stored_absolute_and_globs_as_given(self):
+        self.assertEqual(sw.add_ignore(os.path.join(self.dir, 'secrets')), os.path.join(self.dir, 'secrets'))
+        self.assertEqual(sw.add_ignore('~/private'), os.path.abspath(os.path.expanduser('~/private')))
+        self.assertEqual(sw.add_ignore('backups'), 'backups')
+        self.assertEqual(len(sw.ignores()), 3)
+        self.assertTrue(sw.remove_ignore('~/private'))
+        self.assertFalse(sw.remove_ignore('~/private'))
+        self.assertEqual(sw.ignores(), [os.path.join(self.dir, 'secrets'), 'backups'])
+
+    def test_ignored_folders_and_globs_skip_files(self):
+        sw.add_ignore(os.path.join(self.dir, 'secrets'))
+        sw.add_ignore('backups')
+        sw.add_ignore('*.tmp')
+        for p in ('secrets/key.pem', 'backups/daily/db.sql', 'scratch.tmp', 'secrets-not/ok.txt', 'app.conf'):
+            os.makedirs(os.path.dirname(os.path.join(self.dir, p)), exist_ok=True)
+            Path(self.dir, p).write_text('x')
+        sw.watch_once(self.dir)
+        names = sorted(os.path.relpath(f['path'], self.dir).replace(os.sep, '/') for f in sw.collect(self.dir)['files'])
+        self.assertEqual(names, ['app.conf', 'secrets-not/ok.txt'], 'a prefix that is not the same folder still counts')
+
+    def test_commands_typed_in_an_ignored_folder_are_skipped(self):
+        sw.add_ignore(os.path.join(self.dir, 'secrets'))
+        self.assertFalse(sw.record_cmd(os.path.join(self.dir, 'secrets'), '1  cat key.pem', 0))
+        self.assertTrue(sw.record_cmd(self.dir, '2  ls', 0))
+
+    def test_claude_sessions_in_ignored_folders_are_not_sent_and_ignored_files_are_dropped(self):
+        srv = FakeServer()
+        try:
+            cfg = {'server': srv.url, 'token': 't'}
+            t = os.path.join(self.home, 't.jsonl')
+            transcript(t, [user('tidy up'), tool('Edit', {'file_path': os.path.join(self.dir, 'secrets', 'k')}),
+                           tool('Edit', {'file_path': os.path.join(self.dir, 'app.conf')})])
+            sw.add_ignore(os.path.join(self.dir, 'secrets'))
+            sw.cmd_claude_hook({'transcript_path': t, 'cwd': os.path.join(self.dir, 'secrets'), 'session_id': 'a'}, cfg)
+            self.assertEqual(srv.bodies, [])
+            sw.cmd_claude_hook({'transcript_path': t, 'cwd': self.dir, 'session_id': 'b'}, cfg)
+            self.assertEqual([f['path'] for f in srv.bodies[0][1]['files']], [os.path.join(self.dir, 'app.conf')])
+        finally:
+            srv.close()
+
+    def test_command_line(self):
+        self.assertEqual(sw.main(['ignore']), 0)
+        self.assertEqual(sw.main(['ignore', '*.bak']), 0)
+        self.assertEqual(sw.main(['unignore', '*.bak']), 0)
+        self.assertEqual(sw.main(['unignore', '*.bak']), 1)
+
+
+class Update(unittest.TestCase):
+    """swjtrack update: fetches /swjtrack from the server and installs it only if it is a working script."""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp()
+        os.environ['SWJTRACK_HOME'] = self.home
+        os.environ['SWJTRACK_NO_WATCH'] = '1'
+        self.target = Path(self.home, 'swjtrack')
+        self.target.write_text('old')
+        self.body = b''
+        outer = self
+
+        class H(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200 if self.path == '/swjtrack' else 404)
+                self.end_headers()
+                self.wfile.write(outer.body)
+
+            def log_message(self, *a):
+                pass
+
+        self.httpd = HTTPServer(('127.0.0.1', 0), H)
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.cfg = {'server': f'http://127.0.0.1:{self.httpd.server_address[1]}', 'token': 't'}
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        os.environ.pop('SWJTRACK_HOME', None)
+        os.environ.pop('SWJTRACK_NO_WATCH', None)
+
+    def test_installs_a_newer_version(self):
+        self.body = b"#!/usr/bin/env python3\nVERSION = '9.9.9'\nprint('hi')\n"
+        self.assertEqual(sw.cmd_update(self.cfg, str(self.target)), 0)
+        self.assertIn("VERSION = '9.9.9'", self.target.read_text())
+
+    def test_same_version_is_left_alone(self):
+        self.body = f"#!/usr/bin/env python3\nVERSION = '{sw.VERSION}'\n".encode()
+        self.assertEqual(sw.cmd_update(self.cfg, str(self.target)), 0)
+        self.assertEqual(self.target.read_text(), 'old')
+
+    def test_refuses_anything_that_is_not_a_working_script(self):
+        for body in (b'<html>login</html>', b"#!/usr/bin/env python3\nVERSION = '9.9.9'\ndef (\n"):
+            self.body = body
+            self.assertEqual(sw.cmd_update(self.cfg, str(self.target)), 1)
+            self.assertEqual(self.target.read_text(), 'old')
+
+    def test_the_served_script_is_valid(self):
+        text = SCRIPT.read_text(encoding='utf-8')
+        compile(text, 'swjtrack', 'exec')
+        self.assertEqual(sw._remote_version(text), sw.VERSION)
+
+
 if __name__ == '__main__':
     unittest.main()
