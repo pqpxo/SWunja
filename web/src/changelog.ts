@@ -4,6 +4,13 @@ export type Release = { version: string; date: string; changes: string[] };
 
 export const CHANGELOG: Release[] = [
   {
+    version: '1.19.0', date: '2026-11-01', changes: [
+      'Dismissed activity can be brought back: on the Activity page\'s Dismissed tab, Restore moves an item back to Waiting with its suggestion, ready to accept.',
+      'Fix: ignoring a folder in swjtrack made its files show up as deleted in the next sync. Files that are now ignored are dropped quietly instead, and anything already waiting for an ignored path is left out of the sync. Your files were never touched; swjtrack only reads folders.',
+      'The agent is now 1.3.1; swjtrack update gets it.',
+    ],
+  },
+  {
     version: '1.18.0', date: '2026-11-01', changes: [
       'swjtrack --menu: Monitored folders has an Ignored files and folders section to show, add and remove ignores.',
       'swjtrack --menu: Sync has View waiting changes, which lists the files, commands and git commits the next sync would send, for one folder or all of them. Viewing sends nothing.',

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from './db.ts';
 import * as s from './services.ts';
-import { acceptActivity, bindingFor, createActivity, dismissActivity, getActivity, listActivity, listBindings, setBinding } from './activity.ts';
+import { acceptActivity, bindingFor, createActivity, dismissActivity, getActivity, listActivity, listBindings, restoreActivity, setBinding } from './activity.ts';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -159,6 +159,21 @@ test('dismiss writes nothing to tasks; a dismissed item cannot be accepted', asy
   assert.equal(dismissActivity(db, a.id).status, 'dismissed');
   assert.equal(s.listComments(db, task.id).length, 0);
   assert.throws(() => acceptActivity(db, a.id), /dismissed/);
+});
+
+test('a dismissed item can be restored with its suggestion and then accepted', async () => {
+  const { db, task, a } = world();
+  await matchActivity(db, a.id, { client: null });
+  dismissActivity(db, a.id);
+  const back = restoreActivity(db, a.id);
+  assert.equal(back.status, 'matched');
+  assert.ok(back.suggestion, 'suggestion kept');
+  assert.throws(() => restoreActivity(db, a.id), (e: any) => e.status === 400);
+  acceptActivity(db, a.id, { task_id: task.id });
+  assert.equal(s.listComments(db, task.id).length, 1);
+  const b = createActivity(db, { source: 'mcp', host: 'h', folder: '/x', summary: 'never matched' });
+  dismissActivity(db, b.id);
+  assert.equal(restoreActivity(db, b.id).status, 'pending', 'no suggestion yet, so it waits to be matched');
 });
 
 test('activity job runs at most hourly', async () => {

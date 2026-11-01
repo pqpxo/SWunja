@@ -244,6 +244,11 @@ export function registerApi(fastify: FastifyInstance, db: DatabaseSync, dataDir:
   app.post('/api/activity/:id/match', async (req: Req) => cl.matchActivity(db, +req.params.id));
   app.post('/api/activity/:id/accept', async (req: Req) => act.acceptActivity(db, +req.params.id, req.body ?? {}));
   app.post('/api/activity/:id/dismiss', async (req: Req) => act.dismissActivity(db, +req.params.id));
+  app.post('/api/activity/:id/restore', async (req: Req) => {
+    const a = act.restoreActivity(db, +req.params.id);
+    if (a.status === 'pending') cl.matchActivity(db, a.id).catch(e => req.log.error(e, 'activity match failed'));
+    return a;
+  });
   app.delete('/api/activity/:id', async (req: Req) => act.deleteActivity(db, +req.params.id));
   app.get('/api/folder-bindings', async () => act.listBindings(db));
   app.put('/api/folder-bindings', async (req: Req) => { act.setBinding(db, String(req.body?.folder ?? ''), Number(req.body?.project_id)); return act.listBindings(db); });
