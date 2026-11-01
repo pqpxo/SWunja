@@ -181,7 +181,7 @@ Most homelab work never makes it into a tracker: you SSH in, fix something, and 
 
 It has two parts:
 - **Folder tracking** on a Linux host. It records the commands you type and the files that change inside folders you choose, plus any git commits made there.
-- **A Claude Code hook.** At the end of each Claude Code session, it reports what you asked for, the commands Claude ran and the files it changed.
+- **A Claude Code hook.** At the end of each Claude Code session, it reports what you asked for, the commands Claude ran and the files it changed. It covers every session on that host in any folder, not just tracked ones, and sends straight away rather than waiting for you to sync.
 
 ### Install
 
@@ -193,9 +193,9 @@ curl -fsSL http://<your-server>:7760/swjtrack/install | sh
 
 It needs `python3` and nothing else: the agent is a single Python file that uses only the standard library. The installer walks you through:
 1. **An API token.** Create one in **Settings → API Tokens & MCP**. The installer checks it works before saving it.
-2. **Which folders to track,** for example `~/docker/nextcloud`. Only these folders are recorded.
+2. **Which folders to track,** for example `~/docker/nextcloud`. Only these folders are recorded by folder tracking.
 3. **How often to ask you to sync** (the check-in interval, 2 hours by default).
-4. **Whether to add the Claude Code hook.**
+4. **Whether to add the Claude Code hook.** It goes in `~/.claude/settings.json`, so it applies to all your Claude Code sessions on that host. To remove it, delete the `swjtrack claude-hook` entry under `SessionEnd`.
 
 The agent lives in `~/.local/bin/swjtrack`. Its config (server and token) is in `~/.config/swjtrack/config.json`, readable only by you. A short hook added to `~/.bashrc` (and `~/.zshrc` if you have one) records commands.
 
@@ -206,13 +206,13 @@ Inside a tracked folder:
 - **Files** created, edited or deleted, found by a background watcher every few seconds. Logs, swap files and SQLite journals are skipped, and `swjtrack ignore GLOB` skips anything else.
 - **Git commits** made since the last sync.
 
-From Claude Code: the prompts you typed, the commands it ran and the files it changed.
+From Claude Code (any folder): the prompts you typed, the commands it ran and the files it changed.
 
 It **never sends file contents**, only names, change counts, commands and commit messages. Passwords and tokens in commands are masked on the host before anything is sent. This covers things like `--password`, `curl -u user:pass`, `user:pass@` URLs, `*_TOKEN=` variables, `Authorization:` headers and long random-looking keys.
 
 ### Syncing
 
-Activity is kept on the host until you sync it. Once a tracked folder has activity and the check-in interval has passed, your next prompt there asks:
+Folder activity is kept on the host until you sync it. (Claude Code sessions skip this and are sent when the session ends.) Once a tracked folder has activity and the check-in interval has passed, your next prompt there asks:
 
 ```
 12 activities for /home/me/docker/nextcloud since 14:05. Sync to SWunja? [Y/n/show]
@@ -222,7 +222,7 @@ Activity is kept on the host until you sync it. Once a tracked folder has activi
 - **show** lists it first.
 - **n** asks again after another interval.
 
-`swjtrack sync` sends it straight away. If SWunja can't be reached, nothing is lost: it stays on the host for next time.
+`swjtrack sync` sends it straight away. If SWunja can't be reached, folder activity isn't lost: it stays on the host for next time. A Claude Code session that can't be sent is not retried; the hook prints an error and the session is skipped.
 
 While you work, the agent also tells SWunja how much is waiting. If a folder still has unsynced activity after 24 hours, SWunja sends a reminder through your notification channels, at most once a day. You can change the 24 hours on the Activity page.
 
