@@ -726,5 +726,120 @@ class Update(unittest.TestCase):
         self.assertEqual(sw._remote_version(text), sw.VERSION)
 
 
+class Menu(unittest.TestCase):
+    """swjtrack --menu: key handling, and each section driven with scripted picks and answers."""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp()
+        os.environ['SWJTRACK_HOME'] = self.home
+        os.environ['SWJTRACK_NO_WATCH'] = '1'
+        self.dir = tempfile.mkdtemp()
+        self.saved = sw._pick, sw.input if hasattr(sw, 'input') else None, sw.getpass.getpass, sw.CONFIG, sw.load_config, sw.save_config
+        self.cfg_path = Path(self.home, 'config.json')
+        sw.load_config = lambda path=self.cfg_path: self.saved[4](path)
+        sw.save_config = lambda cfg, path=self.cfg_path: self.saved[5](cfg, path)
+        self.out = []
+        sw.print = lambda *a, **k: self.out.append(' '.join(map(str, a)))
+
+    def tearDown(self):
+        sw._pick, _, sw.getpass.getpass, sw.CONFIG, sw.load_config, sw.save_config = self.saved
+        for name in ('input', 'print'):
+            sw.__dict__.pop(name, None)
+        os.environ.pop('SWJTRACK_HOME', None)
+        os.environ.pop('SWJTRACK_NO_WATCH', None)
+
+    def script(self, picks, answers=()):
+        picks, answers = iter(picks), iter(answers)
+        sw._pick = lambda title, items, note='': next(picks)
+        sw.input = lambda prompt='': next(answers)
+
+    def test_keys(self):
+        self.assertEqual(sw._menu_key(258, 0, 3), ('move', 1))
+        self.assertEqual(sw._menu_key(259, 0, 3), ('move', 2), 'wraps to the bottom')
+        self.assertEqual(sw._menu_key(10, 1, 3), ('pick', 1))
+        self.assertEqual(sw._menu_key(ord('2'), 0, 3), ('pick', 1))
+        self.assertEqual(sw._menu_key(ord('9'), 0, 3), ('move', 0), 'no item 9')
+        self.assertEqual(sw._menu_key(27, 1, 3), ('back', None))
+
+    def test_add_schedule_amend_and_remove_a_folder(self):
+        self.script([1, None], [self.dir, '30m', ''])                       # Folders > Add, then back
+        sw._menu_folders()
+        f = os.path.abspath(self.dir)
+        self.assertEqual(sw.tracked()[f]['interval_s'], 1800)
+        self.script([1, 0, None], ['4h', ''])                               # Sync > Schedule > All folders
+        sw._menu_sync()
+        self.assertEqual(sw.tracked()[f]['interval_s'], 4 * 3600)
+        self.script([2, 0, None], ['1d', ''])                               # Sync > Amend > the folder
+        sw._menu_sync()
+        self.assertEqual(sw.tracked()[f]['interval_s'], 86400)
+        self.script([2, 0, None], ['soon', ''])                             # a bad interval changes nothing
+        sw._menu_sync()
+        self.assertEqual(sw.tracked()[f]['interval_s'], 86400)
+        sw.record_cmd(f, '1  ls', 0)
+        self.script([2, 0, 1, None], [''])                                  # Remove > folder > discard waiting
+        sw._menu_folders()
+        self.assertEqual(sw.tracked(), {})
+
+    def test_run_a_sync(self):
+        srv = FakeServer()
+        try:
+            sw.save_config({'server': srv.url, 'token': 't'})
+            sw.track(self.dir, 7200)
+            sw.record_cmd(self.dir, '1  docker compose up -d', 0)
+            self.script([0, 0, None], [''])                                 # Sync > Run > All folders
+            sw._menu_sync()
+            self.assertEqual(srv.bodies[0][1]['commands'][0]['cmd'], 'docker compose up -d')
+            self.assertIn('Sent 1 item to SWunja.', self.out)
+        finally:
+            srv.close()
+
+    def test_token_is_checked_before_saving_and_can_be_removed(self):
+        srv = FakeServer(good=['right'])
+        try:
+            sw.getpass.getpass = lambda prompt='': 'wrong'
+            self.script([0, None], [srv.url, ''])
+            sw._menu_token()
+            self.assertNotIn('token', sw.load_config())
+            sw.getpass.getpass = lambda prompt='': 'right'
+            self.script([0, None], [srv.url, ''])
+            sw._menu_token()
+            self.assertEqual(sw.load_config(), {'server': srv.url, 'token': 'right'})
+            self.script([1, None], ['y', ''])
+            sw._menu_token()
+            self.assertEqual(sw.load_config(), {'server': srv.url})
+        finally:
+            srv.close()
+
+    def test_needs_a_terminal(self):
+        sw.__dict__.pop('print', None)
+        self.assertEqual(sw.main(['--menu']), 2)
+
+    @unittest.skipUnless(hasattr(os, 'fork'), 'needs a real terminal (Linux or macOS)')
+    def test_curses_menu_in_a_real_terminal(self):
+        import pty
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.environ['TERM'] = 'xterm'
+            choice = sw._pick('Pick one', ['First', 'Second', 'Back'])
+            os.write(1, f'\nGOT:{choice}\n'.encode())
+            os._exit(0)
+        out = b''
+        while b'Second' not in out:
+            out += os.read(fd, 4096)
+        os.write(fd, b'\x1bOB')   # arrow down, as a terminal in keypad mode sends it
+        time.sleep(0.3)
+        os.write(fd, b'\r')
+        while b'GOT:' not in out:
+            try:
+                chunk = os.read(fd, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            out += chunk
+        os.waitpid(pid, 0)
+        self.assertIn(b'GOT:1', out)
+
+
 if __name__ == '__main__':
     unittest.main()

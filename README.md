@@ -242,6 +242,7 @@ When you accept, SWunja remembers which project that folder belongs to, so later
 
 | Command | What it does |
 | --- | --- |
+| `swjtrack --menu` | Opens an arrow-key menu for everything below: the API token, tracked folders, syncing, check-in intervals and updates. |
 | `swjtrack status` | Lists the tracked folders, what's waiting and when each last synced. |
 | `swjtrack sync [-f DIR]` | Sends waiting activity now, for every folder or just one. |
 | `swjtrack -f DIR [-i 30m]` | Tracks another folder, optionally with its own check-in interval. |

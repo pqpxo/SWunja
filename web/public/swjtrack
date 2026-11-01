@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """swjtrack: sends work you do in tracked folders (and Claude Code sessions) to SWunja's Activity inbox.
 
+  swjtrack --menu             menu for the token, folders, syncing and updates
   swjtrack -f DIR [-i 30m]    track a folder (default check-in interval 2h)
   swjtrack stop -f DIR        stop tracking it (sync first, or add --discard)
   swjtrack status             what is tracked and waiting
@@ -35,7 +36,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = '1.1.0'
+VERSION = '1.2.0'
 CONFIG = Path.home() / '.config' / 'swjtrack' / 'config.json'
 CAPS = {'prompts': 50, 'commands': 500, 'files': 1000, 'commits': 200}
 
@@ -658,6 +659,236 @@ def parse_interval(s: str) -> int:
     return int(m.group(1)) * {'s': 1, 'm': 60, 'h': 3600, 'd': 86400, '': 60}[m.group(2)]
 
 
+# ---------------- menu (swjtrack --menu) ----------------
+
+LOGO = r'''
+ _____      ___ _____ ___    _   ___ _  __
+/ __\ \    / / |_   _| _ \  /_\ / __| |/ /
+\__ \\ \/\/ / || || | |   / / _ \ (__| ' <
+|___/ \_/\_/ \__/ |_| |_|_\/_/ \_\___|_|\_\
+'''.strip('\n').split('\n')
+KEYS_UP, KEYS_DOWN = (259, ord('k')), (258, ord('j'))           # curses.KEY_UP / KEY_DOWN, or vi keys
+KEYS_PICK, KEYS_BACK = (10, 13, 343, 261), (27, ord('q'), 260)  # Enter / KEY_ENTER / KEY_RIGHT; Esc, q, KEY_LEFT
+
+
+def _menu_key(key: int, i: int, n: int) -> tuple:
+    """('move', index) | ('pick', index) | ('back', None) for one key press in a list of n items."""
+    if key in KEYS_UP:
+        return 'move', (i - 1) % n
+    if key in KEYS_DOWN:
+        return 'move', (i + 1) % n
+    if key in KEYS_PICK:
+        return 'pick', i
+    if key in KEYS_BACK:
+        return 'back', None
+    if ord('1') <= key <= ord('9') and key - ord('1') < n:
+        return 'pick', key - ord('1')
+    return 'move', i
+
+
+def _pick(title: str, items: list, note: str = '') -> int | None:
+    """Arrow-key list under the logo; the chosen index, or None for Esc/q/Back (always the last item)."""
+    import curses
+
+    def run(scr) -> int | None:
+        curses.curs_set(0)
+        try:
+            curses.use_default_colors()
+            curses.init_pair(1, curses.COLOR_CYAN, -1)
+            accent = curses.color_pair(1) | curses.A_BOLD
+        except curses.error:
+            accent = curses.A_BOLD
+        i = 0
+        while True:
+            scr.erase()
+            h, w = scr.getmaxyx()
+            lines = [(l, accent) for l in LOGO] + [('', 0), (title, curses.A_BOLD)]
+            lines += [(l, curses.A_DIM) for l in note.split('\n') if l] + [('', 0)]
+            lines += [((' > ' if n == i else '   ') + f'{n + 1}. {item}', curses.A_REVERSE if n == i else 0) for n, item in enumerate(items)]
+            lines += [('', 0), ('Up/Down to move, Enter to choose, q or Esc to go back', curses.A_DIM)]
+            for y, (text, attr) in enumerate(lines[:h]):
+                try:
+                    scr.addnstr(y, 1, text, max(w - 2, 1), attr)
+                except curses.error:  # the bottom-right cell can't be written to
+                    pass
+            scr.refresh()
+            action, i = _menu_key(scr.getch(), i, len(items))
+            if action == 'back' or action == 'pick' and i == len(items) - 1:
+                return None
+            if action == 'pick':
+                return i
+
+    os.environ.setdefault('ESCDELAY', '50')  # Esc goes back at once instead of after curses' default 1 s wait
+    return curses.wrapper(run)
+
+
+def _pause() -> None:
+    input('\nPress Enter to go back ')
+
+
+def _choose_folder(title: str, extra: str | None = None) -> str | None:
+    """Picks a tracked folder; with extra, that is offered first and returned as ''."""
+    folders = tracked()
+    if not folders:
+        print('Nothing is tracked yet. Add a folder first.')
+        _pause()
+        return None
+    names = list(folders)
+    label = lambda f: f'{f}  ({pending_count(f)} waiting, check-in every {_fmt_interval(folders[f].get("interval_s", 7200))})'
+    items = ([extra] if extra else []) + [label(f) for f in names] + ['Back']
+    i = _pick(title, items)
+    if i is None:
+        return None
+    if extra:
+        return '' if i == 0 else names[i - 1]
+    return names[i]
+
+
+def _fmt_interval(s: int) -> str:
+    return f'{s // 86400}d' if s % 86400 == 0 else f'{s // 3600}h' if s % 3600 == 0 else f'{s // 60}m'
+
+
+def _ask_interval(current: int) -> int | None:
+    answer = input(f'Check-in interval, like 30m, 2h or 1d [{_fmt_interval(current)}]: ').strip()
+    try:
+        return parse_interval(answer) if answer else current
+    except SystemExit as e:
+        print(e)
+        return None
+
+
+def _menu_token() -> None:
+    while True:
+        cfg = load_config()
+        state = 'API token saved' if cfg.get('token') else 'No API token saved'
+        i = _pick('API token', ['Add or replace the API token', 'Remove the API token', 'Back'],
+                  f'Server: {cfg.get("server") or "not set"}\n{state}')
+        if i is None:
+            return
+        if i == 0:
+            server = input(f'SWunja address [{cfg.get("server") or "http://server:7760"}]: ').strip() or cfg.get('server')
+            if not server:
+                print('An address is needed, for example http://192.168.1.20:7760')
+            else:
+                token = getpass.getpass('Paste the token (it stays hidden): ').strip()
+                try:
+                    ok = bool(token) and check_token(server, token)
+                except SyncError as e:
+                    print(f'Could not reach SWunja at {server} ({e}). Nothing changed.')
+                else:
+                    if ok:
+                        save_config({**cfg, 'server': server.rstrip('/'), 'token': token})
+                        print('Token works and is saved (readable only by you).')
+                    else:
+                        print('That token was not accepted. Nothing changed.')
+        elif i == 1:
+            if not cfg.get('token'):
+                print('There is no token to remove.')
+            elif input('Remove the saved token? Syncing stops until you add one. [y/N] ').strip().lower() == 'y':
+                cfg.pop('token')
+                save_config(cfg)
+                print('Token removed.')
+        _pause()
+
+
+def _menu_folders() -> None:
+    while True:
+        i = _pick('Monitored folders', ['Show tracked folders', 'Add a folder', 'Remove a folder', 'Back'])
+        if i is None:
+            return
+        if i == 0:
+            cmd_status()
+        elif i == 1:
+            folder = input(f'Folder to track [{os.getcwd()}]: ').strip() or os.getcwd()
+            interval = _ask_interval(7200)
+            if interval is not None:
+                try:
+                    f = track(folder, interval)
+                except SystemExit as e:
+                    print(e)
+                else:
+                    if not os.environ.get('SWJTRACK_NO_WATCH'):
+                        ensure_watcher()
+                    print(f'Tracking {f}, check-in every {_fmt_interval(interval)}.')
+        elif i == 2:
+            folder = _choose_folder('Remove which folder?')
+            if folder is None:
+                continue
+            n = pending_count(folder)
+            if n:
+                j = _pick(f'{n} activities in {folder} are not synced yet',
+                          ['Sync them, then stop tracking', 'Discard them and stop tracking', 'Back'])
+                if j is None:
+                    continue
+                if j == 0:
+                    try:
+                        sync(None, folder)
+                    except SyncError as e:
+                        print(f'Sync failed ({e}); still tracking {folder}.')
+                        _pause()
+                        continue
+            untrack(folder)
+            print(f'Stopped tracking {folder}.')
+        _pause()
+
+
+def _menu_sync() -> None:
+    while True:
+        i = _pick('Sync', ['Run a sync now', 'Schedule: set the check-in interval', 'Amend: change a folder\'s check-in interval', 'Back'],
+                  'You\'re asked at your prompt once a folder\'s check-in interval has passed.')
+        if i is None:
+            return
+        if i == 0:
+            folder = _choose_folder('Sync which folder?', 'All folders')
+            if folder is None:
+                continue
+            try:
+                ids = sync(None, folder or None)
+                print(f'Sent {len(ids)} item{"s" if len(ids) != 1 else ""} to SWunja.' if ids else 'Nothing to send.')
+            except SyncError as e:
+                print(f'Sync failed ({e}); activity kept on this host.')
+        elif i in (1, 2):
+            folder = _choose_folder('Which folder?', 'All folders' if i == 1 else None)
+            if folder is None:
+                continue
+            targets = [folder] if folder else list(tracked())
+            interval = _ask_interval(tracked()[targets[0]].get('interval_s', 7200))
+            if interval is not None:
+                for f in targets:
+                    _set_state(f, interval_s=interval)
+                print(f'Check-in every {_fmt_interval(interval)} for {folder or "all folders"}.')
+        _pause()
+
+
+def cmd_menu() -> int:
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print('swjtrack: --menu needs a terminal', file=sys.stderr)
+        return 2
+    try:
+        import curses  # noqa: F401 - not on Windows
+    except ImportError:
+        print('swjtrack: --menu needs a Linux or macOS terminal', file=sys.stderr)
+        return 2
+    sections = [('API token', _menu_token), ('Monitored folders', _menu_folders), ('Sync', _menu_sync)]
+    try:
+        while True:
+            cfg = load_config()
+            i = _pick(f'swjtrack {VERSION} on {socket.gethostname()}', [s for s, _ in sections] + ['Update swjtrack', 'Quit'],
+                      f'Server: {cfg.get("server") or "not set"}  ·  {len(tracked())} folder(s) tracked')
+            if i is None:
+                return 0
+            if i == len(sections):
+                code = cmd_update()
+                _pause()
+                if code == 0 and _remote_version(Path(__file__).resolve().read_text(encoding='utf-8')) != VERSION:
+                    os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve()), '--menu'])  # reopen in the new version
+            else:
+                sections[i][1]()
+    except KeyboardInterrupt:
+        print()
+        return 0
+
+
 # ---------------- command line ----------------
 
 def cmd_setup(server: str, token: str | None = None, cfg_path: Path = CONFIG, rc_files: list | None = None) -> int:
@@ -865,6 +1096,8 @@ def main(argv: list[str]) -> int:
         return cmd_claude_setup(argv[1] if len(argv) > 1 else None)
     if cmd == 'update':
         return cmd_update()
+    if cmd in ('--menu', 'menu'):
+        return cmd_menu()
     if cmd == '--version':
         print(VERSION)
         return 0

@@ -4,6 +4,12 @@ export type Release = { version: string; date: string; changes: string[] };
 
 export const CHANGELOG: Release[] = [
   {
+    version: '1.17.0', date: '2026-11-01', changes: [
+      'swjtrack --menu opens an arrow-key menu on Linux hosts: add, replace or remove the API token (checked before saving), show, add or remove tracked folders, run a sync, set or change each folder\'s check-in interval, and update the agent.',
+      'The agent is now 1.2.0. Hosts with 1.1.0 can get it with swjtrack update.',
+    ],
+  },
+  {
     version: '1.16.0', date: '2026-11-01', changes: [
       'swjtrack can ignore whole folders: swjtrack ignore /srv/app/secrets (or ~/x, ./x) skips the files in it, commands typed there and Claude Code sessions run there. Names and globs such as backups or *.tmp still work, and now also skip matching folders.',
       'swjtrack ignore on its own lists what is ignored, and swjtrack unignore removes an entry.',
