@@ -4,6 +4,13 @@ export type Release = { version: string; date: string; changes: string[] };
 
 export const CHANGELOG: Release[] = [
   {
+    version: '1.16.0', date: '2026-11-01', changes: [
+      'swjtrack can ignore whole folders: swjtrack ignore /srv/app/secrets (or ~/x, ./x) skips the files in it, commands typed there and Claude Code sessions run there. Names and globs such as backups or *.tmp still work, and now also skip matching folders.',
+      'swjtrack ignore on its own lists what is ignored, and swjtrack unignore removes an entry.',
+      'swjtrack update fetches the latest agent from your SWunja server and restarts its folder watcher. It only replaces itself with a script that would actually run. The agent is now 1.1.0; older agents need reinstalling once with the install command to get update.',
+    ],
+  },
+  {
     version: '1.15.0', date: '2026-11-01', changes: [
       'Security fixes from a review before going public. None needed a login to exploit except where noted.',
       'Wrong passwords are slowed down: after 5 from one address it has to wait (1 second, doubling up to 15 minutes), and past 30 in a minute every login waits a minute.',
