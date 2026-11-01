@@ -10,6 +10,7 @@
   <a href="#quick-start">Quick start</a> ·
   <a href="#a-quick-tour">Tour</a> ·
   <a href="#claude-code-mcp">Claude Code</a> ·
+  <a href="#activity-agent-swjtrack-optional">Activity agent</a> ·
   <a href="#configuration">Configuration</a> ·
   <a href="#develop">Develop</a>
 </p>
@@ -27,6 +28,19 @@ Most task trackers know nothing about servers, and most homelab dashboards can't
 - What breaks if I reboot this host?
 
 It's a single container with one SQLite file, built for one person.
+
+Key features:
+- **Projects and tasks** that nest as deep as you like, with list and kanban views, checklists, labels, priorities, due dates, repeating tasks and custom fields.
+- **Logbook** of changes, incidents, maintenance and observations, with rollback steps for each change.
+- **Maintenance schedule** for recurring jobs such as patching and certificate renewals, with overdue alerts.
+- **Runbooks:** step-by-step procedures you can run, tick off and get reminded to test.
+- **Ideas:** a place on each project for thoughts that aren't tasks yet.
+- **Infrastructure map** (host → VM → container → app) that answers "what depends on this?".
+- **Network register** of subnets, VLANs, IP addresses and ports, with clash warnings and imports from Proxmox and UniFi.
+- **Health checks and release checks**, with notifications by ntfy, Gotify, Pushover, Home Assistant, email or webhook.
+- **Activity agent** (`swjtrack`) that records what you do on your hosts and in Claude Code, and files it against the right task once you accept it.
+- **Claude can use all of it** through the built-in MCP server.
+- **Search, templates, backups** (optionally to Google Drive), import and export, and eleven themes.
 
 <br />
 
@@ -135,7 +149,7 @@ There are eleven themes, including light, dark, Nord, Dracula, Catppuccin and So
 - **Custom fields and project types:** text, number, date, select, checkbox, URL and project-link fields, grouped into types such as Application or Host. Sub-projects inherit their parent's type.
 - **Search:** <kbd>Ctrl</kbd>+<kbd>K</kbd> searches projects, tasks, the logbook, maintenance, runbooks and ideas.
 - **Templates:** save any project or task as a template and reuse it.
-- **Activity:** `swjtrack`, a small Linux agent, and a Claude Code hook record what you did on a host. Claude matches it to the right task for you to accept (optional, needs an Anthropic API key).
+- **Activity:** `swjtrack`, a small Linux agent, and a Claude Code hook record what you did on a host, ready to file against a task. See [Activity agent](#activity-agent-swjtrack-optional).
 - **Backups:** daily SQLite and attachment backups, optionally copied to Google Drive.
 - **Import and export:** one zip of everything; imports Vikunja exports too.
 
@@ -161,15 +175,81 @@ Changes Claude makes show up in each task's history and are marked as new in the
 
 <br />
 
-## swjtrack (optional)
+## Activity agent: swjtrack (optional)
 
-To record what you do on a Linux host, install the agent there:
+Most homelab work never makes it into a tracker: you SSH in, fix something, and move on. `swjtrack` is a small agent that notices that work and sends it to SWunja's **Activity** page. Nothing reaches a task until you accept it.
+
+It has two parts:
+- **Folder tracking** on a Linux host. It records the commands you type and the files that change inside folders you choose, plus any git commits made there.
+- **A Claude Code hook.** At the end of each Claude Code session, it reports what you asked for, the commands Claude ran and the files it changed.
+
+### Install
+
+On each host, run:
 
 ```bash
 curl -fsSL http://<your-server>:7760/swjtrack/install | sh
 ```
 
-The installer asks for an API token, which folders to watch, and how often to remind you to sync.
+It needs `python3` and nothing else: the agent is a single Python file that uses only the standard library. The installer walks you through:
+1. **An API token.** Create one in **Settings → API Tokens & MCP**. The installer checks it works before saving it.
+2. **Which folders to track,** for example `~/docker/nextcloud`. Only these folders are recorded.
+3. **How often to ask you to sync** (the check-in interval, 2 hours by default).
+4. **Whether to add the Claude Code hook.**
+
+The agent lives in `~/.local/bin/swjtrack`. Its config (server and token) is in `~/.config/swjtrack/config.json`, readable only by you. A short hook added to `~/.bashrc` (and `~/.zshrc` if you have one) records commands.
+
+### What it records
+
+Inside a tracked folder:
+- **Commands** you type, with their exit codes.
+- **Files** created, edited or deleted, found by a background watcher every few seconds. Logs, swap files and SQLite journals are skipped, and `swjtrack ignore GLOB` skips anything else.
+- **Git commits** made since the last sync.
+
+From Claude Code: the prompts you typed, the commands it ran and the files it changed.
+
+It **never sends file contents**, only names, change counts, commands and commit messages. Passwords and tokens in commands are masked on the host before anything is sent. This covers things like `--password`, `curl -u user:pass`, `user:pass@` URLs, `*_TOKEN=` variables, `Authorization:` headers and long random-looking keys.
+
+### Syncing
+
+Activity is kept on the host until you sync it. Once a tracked folder has activity and the check-in interval has passed, your next prompt there asks:
+
+```
+12 activities for /home/me/docker/nextcloud since 14:05. Sync to SWunja? [Y/n/show]
+```
+
+- **Y** sends it.
+- **show** lists it first.
+- **n** asks again after another interval.
+
+`swjtrack sync` sends it straight away. If SWunja can't be reached, nothing is lost: it stays on the host for next time.
+
+While you work, the agent also tells SWunja how much is waiting. If a folder still has unsynced activity after 24 hours, SWunja sends a reminder through your notification channels, at most once a day. You can change the 24 hours on the Activity page.
+
+### Matching it to a task
+
+Each synced batch appears on the **Activity** page with its host, folder, files, commands and commits, plus a suggested task.
+- **With an Anthropic API key** (Settings → Integrations → Claude), Claude suggests the task and writes a one-line summary of the work. Claude sees the same masked names, commands, commit messages and prompts, plus the titles of likely tasks, never file contents. Settings shows the tokens used each month.
+- **Without a key,** SWunja suggests the task that shares the most words with the activity.
+
+Then you choose:
+- **Accept** adds the summary as a comment on the task, with the full details in the task's history. You can pick a different task, or have it create a new one in a project.
+- **Dismiss** throws the batch away.
+
+When you accept, SWunja remembers which project that folder belongs to, so later suggestions get better.
+
+### Commands
+
+| Command | What it does |
+| --- | --- |
+| `swjtrack status` | Lists the tracked folders, what's waiting and when each last synced. |
+| `swjtrack sync [-f DIR]` | Sends waiting activity now, for every folder or just one. |
+| `swjtrack -f DIR [-i 30m]` | Tracks another folder, optionally with its own check-in interval. |
+| `swjtrack stop -f DIR` | Stops tracking a folder. Sync first, or add `--discard` to drop what's waiting. |
+| `swjtrack ignore GLOB` | Never records paths matching `GLOB`, for example `*.tmp`. |
+| `swjtrack claude-setup` | Adds the Claude Code hook if you skipped it during install. |
+
+To remove the agent, delete `~/.local/bin/swjtrack`, `~/.config/swjtrack` and `~/.local/share/swjtrack`. Then remove the block between `# >>> swjtrack >>>` and `# <<< swjtrack <<<` in `~/.bashrc` (and `~/.zshrc`).
 
 <br />
 
