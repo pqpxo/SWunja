@@ -766,19 +766,46 @@ class Menu(unittest.TestCase):
         sw._menu_folders()
         f = os.path.abspath(self.dir)
         self.assertEqual(sw.tracked()[f]['interval_s'], 1800)
-        self.script([1, 0, None], ['4h', ''])                               # Sync > Schedule > All folders
+        self.script([2, 0, None], ['4h', ''])                               # Sync > Schedule > All folders
         sw._menu_sync()
         self.assertEqual(sw.tracked()[f]['interval_s'], 4 * 3600)
-        self.script([2, 0, None], ['1d', ''])                               # Sync > Amend > the folder
+        self.script([3, 0, None], ['1d', ''])                               # Sync > Amend > the folder
         sw._menu_sync()
         self.assertEqual(sw.tracked()[f]['interval_s'], 86400)
-        self.script([2, 0, None], ['soon', ''])                             # a bad interval changes nothing
+        self.script([3, 0, None], ['soon', ''])                             # a bad interval changes nothing
         sw._menu_sync()
         self.assertEqual(sw.tracked()[f]['interval_s'], 86400)
         sw.record_cmd(f, '1  ls', 0)
         self.script([2, 0, 1, None], [''])                                  # Remove > folder > discard waiting
         sw._menu_folders()
         self.assertEqual(sw.tracked(), {})
+
+    def test_ignore_from_the_menu(self):
+        secrets = os.path.join(self.dir, 'secrets')
+        self.script([1, 0, None], [secrets, '', ''])                       # Ignored > Add, then Show
+        sw._menu_ignores()
+        self.assertEqual(sw.ignores(), [os.path.abspath(secrets)])
+        self.assertIn(os.path.abspath(secrets), self.out)
+        self.script([2, 0, None], [''])                                     # Ignored > Stop ignoring > the entry
+        sw._menu_ignores()
+        self.assertEqual(sw.ignores(), [])
+        self.script([3, None, None])                                        # Folders > Ignored (back at once) > Back
+        sw._menu_folders()
+
+    def test_view_waiting_changes(self):
+        sw.track(self.dir, 7200)
+        Path(self.dir, 'compose.yml').write_text('x')
+        sw.watch_once(self.dir)
+        sw.record_cmd(self.dir, '1  docker compose up -d', 0)
+        sw.record_cmd(self.dir, '2  false', 1)
+        self.script([1, 0, None], [''])                                     # Sync > View > All folders
+        sw._menu_sync()
+        text = '\n'.join(self.out)
+        self.assertIn('Files (1)', text)
+        self.assertIn('created  compose.yml', text)
+        self.assertIn('docker compose up -d', text)
+        self.assertIn('false  (exit 1)', text)
+        self.assertEqual(len(sw._events(os.path.abspath(self.dir))), 3, 'viewing sends and removes nothing')
 
     def test_run_a_sync(self):
         srv = FakeServer()

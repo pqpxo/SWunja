@@ -4,6 +4,13 @@ export type Release = { version: string; date: string; changes: string[] };
 
 export const CHANGELOG: Release[] = [
   {
+    version: '1.18.0', date: '2026-11-01', changes: [
+      'swjtrack --menu: Monitored folders has an Ignored files and folders section to show, add and remove ignores.',
+      'swjtrack --menu: Sync has View waiting changes, which lists the files, commands and git commits the next sync would send, for one folder or all of them. Viewing sends nothing.',
+      'The agent is now 1.3.0; swjtrack update gets it.',
+    ],
+  },
+  {
     version: '1.17.0', date: '2026-11-01', changes: [
       'swjtrack --menu opens an arrow-key menu on Linux hosts: add, replace or remove the API token (checked before saving), show, add or remove tracked folders, run a sync, set or change each folder\'s check-in interval, and update the agent.',
       'The agent is now 1.2.0. Hosts with 1.1.0 can get it with swjtrack update.',

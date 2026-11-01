@@ -36,7 +36,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = '1.2.0'
+VERSION = '1.3.0'
 CONFIG = Path.home() / '.config' / 'swjtrack' / 'config.json'
 CAPS = {'prompts': 50, 'commands': 500, 'files': 1000, 'commits': 200}
 
@@ -791,11 +791,41 @@ def _menu_token() -> None:
         _pause()
 
 
-def _menu_folders() -> None:
+def _menu_ignores() -> None:
     while True:
-        i = _pick('Monitored folders', ['Show tracked folders', 'Add a folder', 'Remove a folder', 'Back'])
+        entries = ignores()
+        i = _pick('Ignored files and folders', ['Show what is ignored', 'Ignore a folder or file', 'Stop ignoring something', 'Back'],
+                  'Nothing inside an ignored path is recorded: files, commands typed there or Claude Code sessions.')
         if i is None:
             return
+        if i == 0:
+            print('\n'.join(entries) or 'Nothing is ignored.')
+        elif i == 1:
+            print('A path (/srv/app/secrets, ~/x, ./x) ignores that folder or file.')
+            print('A name or glob (backups, *.tmp) ignores anything matching it in every tracked folder.')
+            pattern = input('Ignore: ').strip()
+            if pattern:
+                print(f'Ignoring {add_ignore(pattern)}.')
+        elif i == 2:
+            if not entries:
+                print('Nothing is ignored.')
+            else:
+                j = _pick('Stop ignoring which?', entries + ['Back'])
+                if j is None:
+                    continue
+                remove_ignore(entries[j])
+                print(f'No longer ignoring {entries[j]}.')
+        _pause()
+
+
+def _menu_folders() -> None:
+    while True:
+        i = _pick('Monitored folders', ['Show tracked folders', 'Add a folder', 'Remove a folder', 'Ignored files and folders', 'Back'])
+        if i is None:
+            return
+        if i == 3:
+            _menu_ignores()
+            continue
         if i == 0:
             cmd_status()
         elif i == 1:
@@ -832,9 +862,29 @@ def _menu_folders() -> None:
         _pause()
 
 
+def _print_waiting(folder: str, limit: int = 200) -> None:
+    """What the next sync of this folder would send: files changed, commands typed, git commits."""
+    data = collect(folder)
+    rel = lambda p: os.path.relpath(p, folder) if os.path.isabs(p) else p
+    print(f'\n{folder}')
+    if not (data['files'] or data['commands'] or data['commits']):
+        print('  Nothing waiting.')
+        return
+    for title, rows in (
+        (f'Files ({len(data["files"])})', [f'{f["change"]:<8} {rel(f["path"])}' + (f'  x{f["count"]}' if f['count'] > 1 else '') for f in data['files']]),
+        (f'Commands ({len(data["commands"])})', [c['cmd'] + (f'  (exit {c["exit"]})' if c['exit'] else '') for c in data['commands']]),
+        (f'Git commits ({len(data["commits"])})', [f'{c.get("hash", "")[:7]} {c.get("message", "")}' for c in data['commits']]),
+    ):
+        if rows:
+            print(f'  {title}')
+            print('\n'.join(f'    {r}' for r in rows[:limit]))
+            if len(rows) > limit:
+                print(f'    ... and {len(rows) - limit} more')
+
+
 def _menu_sync() -> None:
     while True:
-        i = _pick('Sync', ['Run a sync now', 'Schedule: set the check-in interval', 'Amend: change a folder\'s check-in interval', 'Back'],
+        i = _pick('Sync', ['Run a sync now', 'View waiting changes', 'Schedule: set the check-in interval', 'Amend: change a folder\'s check-in interval', 'Back'],
                   'You\'re asked at your prompt once a folder\'s check-in interval has passed.')
         if i is None:
             return
@@ -847,8 +897,14 @@ def _menu_sync() -> None:
                 print(f'Sent {len(ids)} item{"s" if len(ids) != 1 else ""} to SWunja.' if ids else 'Nothing to send.')
             except SyncError as e:
                 print(f'Sync failed ({e}); activity kept on this host.')
-        elif i in (1, 2):
-            folder = _choose_folder('Which folder?', 'All folders' if i == 1 else None)
+        elif i == 1:
+            folder = _choose_folder('View which folder?', 'All folders')
+            if folder is None:
+                continue
+            for f in [folder] if folder else list(tracked()):
+                _print_waiting(f)
+        elif i in (2, 3):
+            folder = _choose_folder('Which folder?', 'All folders' if i == 2 else None)
             if folder is None:
                 continue
             targets = [folder] if folder else list(tracked())
