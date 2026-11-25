@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, Menu as MenuIcon, Plus, Search, Settings as SettingsIcon } from 'lucide-react';
+import { Bell, BellOff, ChevronDown, ChevronRight, Menu as MenuIcon, Plus, Search, Settings as SettingsIcon } from 'lucide-react';
 import { api, get, type Appearance, type Field, type Label, type Project, type ProjectType } from './api';
 import { ProjectView, ProjectsPage } from './ProjectView';
 import { TaskPanel } from './TaskPanel';
@@ -97,6 +97,20 @@ function Tree({ projects, parent, depth, current, down, fold }: { projects: Proj
   );
 }
 
+/** Sidebar switch that pauses every notification channel at once (channel tests in Settings still send). */
+function NotifyToggle() {
+  const [paused, setPaused] = useState<boolean | null>(null);
+  useEffect(() => { get<{ paused: boolean }>('/notifications').then(r => setPaused(r.paused)).catch(() => {}); }, []);
+  if (paused === null) return null;
+  const flip = () => api<{ paused: boolean }>('PUT', '/notifications', { paused: !paused }).then(r => setPaused(r.paused)).catch(() => {});
+  return (
+    <button type="button" className={`nav notify-nav ${paused ? 'paused' : ''}`} aria-pressed={!paused} onClick={flip}
+      title={paused ? 'Notifications are paused: alerts are dropped, not saved for later. Click to turn them back on.' : 'Click to pause all notifications'}>
+      {paused ? <BellOff size={17} /> : <Bell size={17} />}Notifications
+    </button>
+  );
+}
+
 function Shell() {
   const data = useData();
   const route = useHashRoute();
@@ -172,6 +186,7 @@ function Shell() {
         </div>
         <div className="grow" />
         <a className={`nav settings-nav ${route.startsWith('settings') ? 'active' : ''}`} href="#/settings"><SettingsIcon size={17} />Settings</a>
+        <NotifyToggle />
       </nav>
       <main className="main">
         {route.startsWith('settings') ? <Settings tab={route.split('/')[1]} />

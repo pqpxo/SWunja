@@ -4,6 +4,11 @@ export type Release = { version: string; date: string; changes: string[] };
 
 export const CHANGELOG: Release[] = [
   {
+    version: '1.20.0', date: '2026-11-25', changes: [
+      'A Notifications switch under Settings in the sidebar pauses every notification channel at once (the bell is crossed out and amber while paused). While paused, alerts (outages, overdue maintenance, updates, activity reminders) are dropped rather than saved for later; Test buttons in Settings still send.',
+    ],
+  },
+  {
     version: '1.19.0', date: '2026-11-01', changes: [
       'Dismissed activity can be brought back: on the Activity page\'s Dismissed tab, Restore moves an item back to Waiting with its suggestion, ready to accept.',
       'Fix: ignoring a folder in swjtrack made its files show up as deleted in the next sync. Files that are now ignored are dropped quietly instead, and anything already waiting for an ignored path is left out of the sync. Your files were never touched; swjtrack only reads folders.',

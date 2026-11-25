@@ -388,10 +388,11 @@ test('maintenance: next due follows the interval, Mark Done logs it, overdue is 
   const m = s.createMaintenance(db, { project_id: p.id, title: 'Test backup restore', every: 3, unit: 'month', next_due: '2020-01-01' });
   assert.equal(m.status, 'overdue');
   assert.equal(m.last_done, null);
-  const { item, log } = s.markMaintenanceDone(db, m.id, { date: '2026-10-28', notes: '<p>Restored /etc from borg</p>' });
-  assert.deepEqual([item.last_done, item.next_due], ['2026-10-28', '2027-01-28']);
+  const today = new Date().toISOString().slice(0, 10); // done today, so the weekly re-plan below is never overdue whenever the tests run
+  const { item, log } = s.markMaintenanceDone(db, m.id, { date: today, notes: '<p>Restored /etc from borg</p>' });
+  assert.deepEqual([item.last_done, item.next_due], [today, s.addInterval(today, 3, 'month')]);
   assert.deepEqual([log.kind, log.title, log.maintenance_id], ['maintenance', 'Test backup restore', m.id]);
-  assert.equal(s.updateMaintenance(db, m.id, { every: 1, unit: 'week' }).next_due, '2026-11-04', 'changing the interval re-plans from the last time it was done');
+  assert.equal(s.updateMaintenance(db, m.id, { every: 1, unit: 'week' }).next_due, s.addInterval(today, 1, 'week'), 'changing the interval re-plans from the last time it was done');
   assert.equal(s.listMaintenance(db, { overdue: true }).length, 0);
   assert.throws(() => s.createMaintenance(db, { project_id: p.id, title: 'x', every: 0, unit: 'day' }), /every/);
   assert.throws(() => s.createMaintenance(db, { project_id: p.id, title: 'x', every: 1, unit: 'fortnight' as never }), /unit/);
