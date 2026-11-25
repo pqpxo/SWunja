@@ -106,7 +106,7 @@ function NotifyToggle() {
   return (
     <button type="button" className={`nav notify-nav ${paused ? 'paused' : ''}`} aria-pressed={!paused} onClick={flip}
       title={paused ? 'Notifications are paused: alerts are dropped, not saved for later. Click to turn them back on.' : 'Click to pause all notifications'}>
-      {paused ? <BellOff size={17} /> : <Bell size={17} />}Notifications {paused ? 'Paused' : 'On'}
+      {paused ? <BellOff size={17} /> : <Bell size={17} />}Notifications
     </button>
   );
 }

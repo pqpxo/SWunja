@@ -5,7 +5,7 @@ export type Release = { version: string; date: string; changes: string[] };
 export const CHANGELOG: Release[] = [
   {
     version: '1.20.0', date: '2026-11-25', changes: [
-      'A Notifications switch under Settings in the sidebar pauses every notification channel at once. While paused, alerts (outages, overdue maintenance, updates, activity reminders) are dropped rather than saved for later; Test buttons in Settings still send.',
+      'A Notifications switch under Settings in the sidebar pauses every notification channel at once (the bell is crossed out and amber while paused). While paused, alerts (outages, overdue maintenance, updates, activity reminders) are dropped rather than saved for later; Test buttons in Settings still send.',
     ],
   },
   {
