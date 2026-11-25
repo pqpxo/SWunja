@@ -132,8 +132,16 @@ export async function sendToChannel(db: DatabaseSync, c: Channel, m: Message): P
   }
 }
 
-/** Sends to every enabled channel that subscribes to the event. */
+/** The sidebar's notifications switch: while paused, alerts are dropped (not queued); channel tests still send. */
+export const notificationsPaused = (db: DatabaseSync) => (db.prepare("SELECT value FROM meta WHERE key='notify_paused'").get() as { value: string } | undefined)?.value === '1';
+export function setNotificationsPaused(db: DatabaseSync, paused: boolean) {
+  db.prepare("INSERT INTO meta VALUES ('notify_paused', ?) ON CONFLICT DO UPDATE SET value=excluded.value").run(paused ? '1' : '0');
+  return { paused };
+}
+
+/** Sends to every enabled channel that subscribes to the event, unless notifications are paused. */
 export function notify(db: DatabaseSync, m: Message): Promise<Result[]> {
+  if (m.event !== 'test' && notificationsPaused(db)) return Promise.resolve([]);
   const targets = listChannels(db).filter(c => c.enabled && (m.event === 'test' || c.events.includes(m.event)));
   return Promise.all(targets.map(c => sendToChannel(db, c, m)));
 }

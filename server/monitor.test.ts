@@ -8,7 +8,7 @@ import { unzipSync } from 'fflate';
 import { DatabaseSync } from 'node:sqlite';
 import { openDb } from './db.ts';
 import * as s from './services.ts';
-import { createChannel, deleteChannel, listChannels, notify, notifyOverdue, setGithubToken, updateChannel } from './notify.ts';
+import { createChannel, deleteChannel, listChannels, notificationsPaused, notify, notifyOverdue, setGithubToken, setNotificationsPaused, updateChannel } from './notify.ts';
 import { createCheck, listChecks, probe, runDueChecks } from './health.ts';
 import { checkUpdates, isNewer, listUpdates, parseRepo } from './updates.ts';
 import { exportAll, importAny } from './transfer.ts';
@@ -39,6 +39,21 @@ test('version compare and GitHub repo parsing', () => {
   assert.equal(isNewer('v2.0', 'v2.0.0'), false);
   assert.equal(isNewer('1.3', '1.4'), false);
   assert.equal(isNewer('2024.10.1', '2024.9.30'), true);
+});
+
+test('pausing notifications drops alerts but still lets a channel test through', async () => {
+  const db = fresh();
+  const r = await recorder();
+  try {
+    createChannel(db, { name: 'Hook', kind: 'webhook', config: { url: `${r.base}/hook` } });
+    assert.equal(notificationsPaused(db), false);
+    setNotificationsPaused(db, true);
+    assert.deepEqual(await notify(db, { event: 'health', title: 'down', message: 'x' }), []);
+    assert.equal(r.hits.length, 0);
+    assert.equal((await notify(db, { event: 'test', title: 'test', message: 'x' })).length, 1, 'tests still send');
+    setNotificationsPaused(db, false);
+    assert.equal((await notify(db, { event: 'health', title: 'down', message: 'x' })).length, 1);
+  } finally { await r.close(); }
 });
 
 test('notifications go to every enabled channel that wants the event; secrets are write-only', async () => {

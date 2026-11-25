@@ -279,6 +279,8 @@ export function registerApi(fastify: FastifyInstance, db: DatabaseSync, dataDir:
   // integrations: notification channels and the GitHub token (secrets are write-only)
   app.get('/api/integrations', async () => ({ channels: nt.listChannels(db), github_token: nt.hasGithubToken(db), kinds: nt.KINDS, events: nt.EVENTS }));
   app.put('/api/integrations/github', async (req: Req) => { nt.setGithubToken(db, req.body?.token ?? null); return { github_token: nt.hasGithubToken(db) }; });
+  app.get('/api/notifications', async () => ({ paused: nt.notificationsPaused(db) }));
+  app.put('/api/notifications', async (req: Req) => nt.setNotificationsPaused(db, !!req.body?.paused));
   app.post('/api/channels', async (req: Req) => nt.createChannel(db, req.body ?? {}));
   app.patch('/api/channels/:id', async (req: Req) => nt.updateChannel(db, +req.params.id, req.body ?? {}));
   app.delete('/api/channels/:id', async (req: Req) => nt.deleteChannel(db, +req.params.id));
